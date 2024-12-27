@@ -1,4 +1,5 @@
 from baseGame import Connect4
+
 class Connect4Engine:
     def __init__(self):
         self.MAX_DEPTH = 2  # Maximum depth for minimax search
@@ -25,8 +26,7 @@ class Connect4Engine:
 
         # Center column control
         center_col = game.cols // 2
-        center_count = sum(1 for row in range(game.rows)
-                         if game.board[row][center_col] == player)
+        center_count = sum(1 for row in range(game.rows) if game.board[row][center_col] == player)
         score += center_count * self.WEIGHTS['center_control']
 
         # Check horizontal windows
@@ -69,7 +69,6 @@ class Connect4Engine:
     def _evaluate_window(self, window, player):
         """Evaluate a window of 4 positions"""
         opponent = 3 - player
-
         if window.count(player) == 4:
             return self.WEIGHTS['win']
         elif window.count(player) == 3 and window.count(0) == 1:
@@ -94,15 +93,12 @@ class Connect4Engine:
         # Try each possible move
         for col in range(game.cols):
             if game.is_valid_move(col):
-                # Create a copy of the game to simulate moves
                 game_copy = Connect4(game.rows)
                 game_copy.board = [row[:] for row in game.board]
                 game_copy.current_player = game.current_player
-
                 game_copy.make_move(col)
                 score = self._minimax(game_copy, self.MAX_DEPTH - 1, False,
-                                   float('-inf'), float('inf'), game.current_player)
-
+                                      float('-inf'), float('inf'), game.current_player)
                 if score > best_score:
                     best_score = score
                     best_move = col
@@ -127,7 +123,6 @@ class Connect4Engine:
                     game_copy = Connect4(game.rows)
                     game_copy.board = [row[:] for row in game.board]
                     game_copy.current_player = game.current_player
-
                     game_copy.make_move(col)
                     eval = self._minimax(game_copy, depth - 1, False, alpha, beta, engine_player)
                     max_eval = max(max_eval, eval)
@@ -142,7 +137,6 @@ class Connect4Engine:
                     game_copy = Connect4(game.rows)
                     game_copy.board = [row[:] for row in game.board]
                     game_copy.current_player = game.current_player
-
                     game_copy.make_move(col)
                     eval = self._minimax(game_copy, depth - 1, True, alpha, beta, engine_player)
                     min_eval = min(min_eval, eval)
