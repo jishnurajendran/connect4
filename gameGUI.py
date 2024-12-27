@@ -5,6 +5,9 @@ import sys
 from baseGame import Connect4
 from engine import Connect4Engine
 from neat_player import NEATPlayer
+from RL_agent import DQNAgent
+import torch
+import numpy as np
 
 class Connect4GUI:
     # Colors
@@ -18,13 +21,20 @@ class Connect4GUI:
     HUMAN_VS_HUMAN = 0
     HUMAN_VS_ENGINE = 1
     HUMAN_VS_NEAT = 2
+    HUMAN_VS_RL = 3
 
     def __init__(self, n, cell_size=100):
-        """Initialize the GUI with board size n and cell size in pixels"""
+        """
+        Initialize the GUI with board size n and cell size in pixels.
+
+        Parameters:
+            n (int): Board size (number of rows and columns)
+            cell_size (int): Cell size in pixels
+        """
         self.game = Connect4(n)
         self.cell_size = cell_size
         self.width = self.game.cols * cell_size
-        self.height = (self.game.rows + 1) * cell_size  # Extra row for piece drop animation
+        self.height = (self.game.rows + 1) * cell_size # Extra row for piece drop animation
         self.engine = Connect4Engine()
         self.game_mode = self.HUMAN_VS_HUMAN
         self.computer_player = 2
@@ -39,65 +49,72 @@ class Connect4GUI:
             self.neat_player = None
             self.neat_available = False
 
+        # Initialize RL player
+        try:
+            self.rl_agent = DQNAgent(self.game.rows * self.game.cols, self.game.cols)
+            self.rl_agent.policy_net.load_state_dict(torch.load("connect4_dqn.pth"))
+            self.rl_agent.policy_net.eval()
+        except FileNotFoundError:
+            print("RL model not found. RL player mode will be disabled.")
+            self.rl_agent = None
+
         # Mode display text
         self.mode_texts = {
             self.HUMAN_VS_HUMAN: "Human vs Human",
             self.HUMAN_VS_ENGINE: "Human vs Engine",
-            self.HUMAN_VS_NEAT: "Human vs NEAT" + (" (Not Available)" if not self.neat_available else "")
+            self.HUMAN_VS_NEAT: "Human vs NEAT" + (" (Not Available)" if not self.neat_available else ""),
+            self.HUMAN_VS_RL: "Human vs RL" + (" (Not Available)" if self.rl_agent is None else "")
         }
 
         # Initialize Pygame
         pygame.init()
         self.screen = pygame.display.set_mode((self.width, self.height))
         pygame.display.set_caption('Connect 4')
-
+        
         # Font for text
         self.font = pygame.font.Font(None, 74)
 
     def toggle_game_mode(self):
-        """Cycle through game modes"""
-        if self.neat_player is None:
-            # If NEAT player is not available, only toggle between human and engine
-            self.game_mode = self.HUMAN_VS_HUMAN if self.game_mode == self.HUMAN_VS_ENGINE else self.HUMAN_VS_ENGINE
-        else:
-            # Cycle through all modes
-            self.game_mode = (self.game_mode + 1) % 3
+        """Cycle through game modes. If the selected game mode is unavailable (because the NEAT or RL model isn't found), skip to the next available mode."""
+        # Increment the game mode
+        self.game_mode = (self.game_mode + 1) % 4
+
+        # If the selected game mode is NEAT player mode and the NEAT model isn't found, skip to the next mode
+        if self.game_mode == self.HUMAN_VS_NEAT and not self.neat_available:
+            self.game_mode = (self.game_mode + 1) % 4
+        # If the selected game mode is RL player mode and the RL model isn't found, skip to the next mode
+        if self.game_mode == self.HUMAN_VS_RL and self.rl_agent is None:
+            self.game_mode = (self.game_mode + 1) % 4
+
+        # Reset the game when the mode is changed
         self.game.reset()
 
     def draw_evaluation(self):
         """Draw the engine's evaluation of the current position"""
         if not self.show_eval:
             return
-
         evaluation = self.engine.evaluate_position(self.game, self.game.current_player)
-
         eval_font = pygame.font.Font(None, 36)
         eval_text = f"Eval: {evaluation:+.1f}"
-
         eval_background = pygame.Surface((200, 30))
         eval_background.fill(self.WHITE)
         eval_background.set_alpha(230)
-
         if evaluation > 0:
             text_color = self.RED
         elif evaluation < 0:
             text_color = self.YELLOW
         else:
             text_color = self.BLACK
-
         eval_surface = eval_font.render(eval_text, True, text_color)
-
         background_rect = eval_background.get_rect(topright=(self.width - 10, 10))
         text_rect = eval_surface.get_rect(center=background_rect.center)
-
         self.screen.blit(eval_background, background_rect)
         self.screen.blit(eval_surface, text_rect)
 
     def draw_status(self):
         """Draw the game status text"""
         pygame.draw.rect(self.screen, self.WHITE,
-                        (0, 0, self.width, self.cell_size))
-
+                         (0, 0, self.width, self.cell_size))
         if self.game.is_game_over():
             if self.game.winner is not None:
                 text = f"Player {self.game.winner} wins!"
@@ -113,19 +130,18 @@ class Connect4GUI:
         instruction_text = "Press R to restart, Q to quit, M to change mode, E to toggle eval"
         mode_text = self.mode_texts[self.game_mode]
 
-        # Add warning color for unavailable NEAT mode
+        # Add warning color for unavailable modes
         mode_color = self.BLACK
-        if self.game_mode == self.HUMAN_VS_NEAT and not self.neat_available:
+        if (self.game_mode == self.HUMAN_VS_NEAT and not self.neat_available) or \
+           (self.game_mode == self.HUMAN_VS_RL and self.rl_agent is None):
             mode_color = self.RED
 
         text_surface = self.font.render(text, True, color)
         text_rect = text_surface.get_rect(
             center=(self.width // 2, self.cell_size // 3))
-
         instruction_surface = instruction_font.render(instruction_text, True, self.BLACK)
         instruction_rect = instruction_surface.get_rect(
             center=(self.width // 2, self.cell_size * 2 // 3))
-
         mode_surface = instruction_font.render(mode_text, True, mode_color)
         mode_rect = mode_surface.get_rect(
             center=(self.width // 2, self.cell_size * 0.85))
@@ -137,13 +153,12 @@ class Connect4GUI:
     def draw_board(self):
         """Draw the game board"""
         self.screen.fill(self.WHITE)
-
         self.draw_status()
         self.draw_evaluation()
 
         # Draw the blue board
         pygame.draw.rect(self.screen, self.BLUE,
-                        (0, self.cell_size, self.width, self.height - self.cell_size))
+                         (0, self.cell_size, self.width, self.height - self.cell_size))
 
         # Draw cells
         for row in range(self.game.rows):
@@ -158,10 +173,9 @@ class Connect4GUI:
                     color = self.RED  # Player 1
                 elif self.game.board[row][col] == 2:
                     color = self.YELLOW  # Player 2
-
                 pygame.draw.circle(self.screen, color,
-                                 (center_x, center_y),
-                                 self.cell_size // 2 - 5)
+                                   (center_x, center_y),
+                                   self.cell_size // 2 - 5)
 
         # Draw the hovering piece in the top row
         if not self.game.is_game_over():
@@ -170,15 +184,11 @@ class Connect4GUI:
             if 0 <= col < self.game.cols:
                 color = self.RED if self.game.current_player == 1 else self.YELLOW
                 pygame.draw.circle(self.screen, color,
-                                 (col * self.cell_size + self.cell_size // 2,
-                                  self.cell_size // 2),
-                                 self.cell_size // 2 - 5)
+                                   (col * self.cell_size + self.cell_size // 2,
+                                    self.cell_size // 2),
+                                   self.cell_size // 2 - 5)
 
         pygame.display.update()
-
-    def show_winner_message(self):
-        """This method is now handled by draw_status"""
-        pass
 
     def run(self):
         """Main game loop"""
@@ -191,7 +201,6 @@ class Connect4GUI:
                 if event.type == pygame.MOUSEBUTTONDOWN and not self.game.is_game_over():
                     mouse_x = event.pos[0]
                     col = mouse_x // self.cell_size
-
                     if self.game.make_move(col):
                         if self.game.is_game_over():
                             self.draw_board()
@@ -201,7 +210,10 @@ class Connect4GUI:
                                 computer_move = self.engine.get_best_move(self.game)
                             elif self.game_mode == self.HUMAN_VS_NEAT and self.neat_player:
                                 computer_move = self.neat_player.get_move(self.game)
-
+                            elif self.game_mode == self.HUMAN_VS_RL and self.rl_agent:
+                                state = np.array(self.game.get_state()).flatten()
+                                valid_moves = self.game.get_valid_moves()
+                                computer_move = self.rl_agent.get_action(state, valid_moves)
                             if computer_move is not None:
                                 self.game.make_move(computer_move)
 
